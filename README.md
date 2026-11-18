@@ -1,6 +1,7 @@
 # Painel — Remoção de Entulhos no Recife (Central 156)
 
-Entregável 4 do Projeto 5 (CC · Análise e Visualização de Dados): **Dashboard Interativo — Versão Inicial**.
+Entregável 6 do Projeto 5 (CC · Análise e Visualização de Dados): **Dashboard Consolidado**.
+Publicado em https://entulhos-recife-156.streamlit.app/
 
 O painel responde às três perguntas do projeto para quem acompanha a limpeza urbana:
 
@@ -44,7 +45,7 @@ Se a planilha da Sprint 2 for atualizada, substitua o XLSX em `dados/entrada/` e
 
 | Arquivo | Função |
 |---|---|
-| `app.py` | Interface Streamlit: filtros, indicadores, abas e gráficos (Plotly). |
+| `app.py` | Interface Streamlit: filtros, navegação por páginas, indicadores e gráficos (Plotly). |
 | `calculos.py` | Regras de cálculo (recorrência, séries, contagens, qualidade), sem interface. |
 | `preparar_dados.py` | Gera a base do painel a partir da planilha tratada. |
 | `tests/test_numeros_eda.py` | Confere se o painel sem filtros reproduz os números da EDA da Sprint 3. |
@@ -54,17 +55,25 @@ Rodar os testes: `python tests/test_numeros_eda.py`
 
 ## O que o painel tem
 
-- **Filtros na barra lateral**, aplicados a tudo: período de abertura (mês a mês), RPA, bairro (a lista
-  acompanha as RPAs escolhidas), situação registrada, arquivo de origem e o mínimo de dias distintos para
-  considerar recorrência (padrão 3). Há um botão para limpar os filtros.
-- **Indicadores:** registros, endereços recorrentes, participação desses endereços, mês de pico e
-  percentual sem coordenadas.
-- **Recorrência:** distribuição de dias distintos por endereço (com destaque do limiar), os 10/20/30
-  endereços com mais dias, tabela pesquisável e o histórico de datas de um endereço ao clicar na linha.
-- **Território:** bairros e RPAs, por registros ou por endereços recorrentes.
-- **Tempo:** série mensal empilhada por arquivo de origem, com o período de cobertura limitada sombreado.
-- **Qualidade dos dados:** coordenadas por arquivo e quadro de problemas com a decisão tomada.
-- **Sobre os dados:** fonte, licença, definições, o que o painel não afirma e próximos passos.
+Seis páginas na barra superior. Todas seguem o mesmo modelo, definido na Proposta de Integração e
+Publicação (entregável 5): pergunta como título → indicadores do recorte → gráfico principal → leitura com
+o número → limite da interpretação → tabela e download sob demanda → rodapé com fonte e licença.
+
+| Página | Pergunta | Conteúdo |
+|---|---|---|
+| Visão geral | O que o painel mostra? | Três achados recalculados pelo filtro (recorrência, território, tempo), cada um com link para sua página; avisos de uso. |
+| Recorrência | Quais endereços voltam a aparecer em dias diferentes? | Distribuição de dias distintos, Top 10/20/30, tabela pesquisável e histórico de um endereço ao clicar. |
+| Território | Em quais bairros e regiões os registros se concentram? | 15 bairros e 6 RPAs, por registros ou por endereços recorrentes. |
+| Tempo | Como os registros variam ao longo dos meses? | Série mensal por arquivo de origem, com a cobertura limitada sombreada. |
+| Qualidade dos dados | Quanto podemos confiar em cada campo? | Coordenadas por arquivo e quadro de problemas com a decisão tomada. |
+| Metodologia e fonte | De onde vêm os dados e o que o painel não afirma? | Fonte, licença, definições, histórico de decisões e download da base filtrada. |
+
+- **Filtros na barra lateral**, aplicados a todas as páginas e mantidos ao trocar de página: período de
+  abertura (mês a mês), RPA, bairro (a lista acompanha as RPAs escolhidas), situação registrada, arquivo de
+  origem e o mínimo de dias distintos para considerar recorrência (padrão 3). Há um botão para limpar os filtros.
+- **Indicadores** no topo de cada página: registros, endereços recorrentes, participação desses endereços,
+  mês de pico e percentual sem coordenadas.
+- Se um filtro não retorna registros, a página avisa e sugere ampliar o período.
 - Cada tabela pode ser baixada em CSV (separador `;`, decimal `,`, compatível com Excel em português).
 
 ## Regras de cálculo (iguais às da EDA)
@@ -91,13 +100,15 @@ registros (22,89% do recorte). O maior caso é RUA CORONEL OLIVEIRA, 53 – AFOG
 - Cinza para o que está abaixo do limiar de recorrência, deixando o destaque nos endereços recorrentes.
 - Grade fina só no eixo de valores, rótulos diretos nas barras e tooltip em todas as marcas.
 - Cada gráfico tem: a pergunta, a leitura gerada a partir dos dados filtrados e o limite da interpretação.
+- **Mesmo modelo em todas as páginas** e uma Visão geral na entrada: o resumo vem antes do detalhe.
 - **Sem mapa nesta versão:** 53,8% dos registros não têm coordenadas, e as existentes ainda não foram
   validadas dentro do território do Recife.
 
-## Publicação (próximo entregável)
+## Publicação
 
-O painel roda no Streamlit Community Cloud sem mudanças: suba esta pasta para um repositório no GitHub
-e aponte o deploy para `app.py`.
+Streamlit Community Cloud, a partir deste repositório (arquivo principal `app.py`). Cada push na branch
+principal atualiza o painel publicado. No plano gratuito o app "dorme" após dias sem acesso e leva cerca de
+30 segundos para acordar: abra o link antes de apresentar.
 
 ## Fonte e licença
 

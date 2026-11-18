@@ -1,8 +1,3 @@
-"""Painel de recorrência de chamados de Remoção de Entulhos — Central 156 do Recife.
-
-Entregável 4 (Dashboard Interativo — Versão Inicial) · Projeto 5 · CESAR School.
-Executar:  streamlit run app.py
-"""
 from __future__ import annotations
 
 import pandas as pd
@@ -41,7 +36,10 @@ st.markdown("""
   .limite {color: #52514e; font-size: 0.86rem; border-left: 3px solid #c3c2b7;
            padding: 0.2rem 0 0.2rem 0.85rem; margin-bottom: 0.4rem;}
   .pergunta {font-size: 1.02rem; margin-bottom: 0.2rem;}
-  h1 {font-size: 1.9rem !important; margin-bottom: 0.2rem !important;}
+  h1 {font-size: 1.75rem !important; margin-bottom: 0.2rem !important;}
+  .marca {color: #52514e; font-size: 0.82rem; letter-spacing: 0.02em; text-transform: uppercase;
+          margin-bottom: 0.1rem;}
+  .achado-num {font-size: 1.6rem; font-weight: 600; line-height: 1.2; margin: 0.1rem 0 0.3rem 0;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -158,58 +156,126 @@ DF = c.filtrar(BASE, ini, fim, st.session_state["f_rpa"], st.session_state["f_ba
 END = c.recorrencia(DF, LIMIAR)
 CAND = END.loc[END["candidato"]]
 
-# ---------------------------------------------------------------- cabeçalho
-st.title("Remoção de entulhos no Recife: onde os chamados se repetem")
-st.markdown(
-    '<p class="nota">Chamados do serviço <b>Remoção de Entulhos</b> (código 6) da Central 156 da Emlurb, com '
-    'abertura em <b>2024 e 2025</b>. Para quem acompanha a limpeza urbana: quais endereços voltam a aparecer, '
-    'onde os registros se concentram e como variam no tempo. '
-    '<b>Chamados registrados não confirmam descarte irregular nem pontos críticos oficiais.</b></p>',
-    unsafe_allow_html=True)
+# ---------------------------------------------------------------- partes comuns a todas as páginas
+def descricao_filtros() -> str:
+    ativos = []
+    if (ini, fim) != (MESES[0], MESES[-1]):
+        ativos.append(f"{c.rotulo_mes(ini)} a {c.rotulo_mes(fim)}")
+    for chave, nome in [("f_rpa", "RPA"), ("f_bairro", "bairro"), ("f_situacao", "situação"), ("f_fonte", "arquivo")]:
+        if st.session_state[chave]:
+            valores = st.session_state[chave]
+            ativos.append(f"{nome}: " + (", ".join(valores) if len(valores) <= 3 else f"{len(valores)} selecionados"))
+    if LIMIAR != c.LIMIAR_PADRAO:
+        ativos.append(f"recorrência: {LIMIAR}+ dias")
+    return " · ".join(ativos) if ativos else "sem filtros"
 
-filtros_ativos = []
-if (ini, fim) != (MESES[0], MESES[-1]):
-    filtros_ativos.append(f"{c.rotulo_mes(ini)} a {c.rotulo_mes(fim)}")
-for chave, nome in [("f_rpa", "RPA"), ("f_bairro", "bairro"), ("f_situacao", "situação"), ("f_fonte", "arquivo")]:
-    if st.session_state[chave]:
-        valores = st.session_state[chave]
-        filtros_ativos.append(f"{nome}: " + (", ".join(valores) if len(valores) <= 3 else f"{len(valores)} selecionados"))
-st.caption(f"Mostrando **{fmt_int(len(DF))}** de {fmt_int(len(BASE))} registros do recorte"
-           + (" · " + " · ".join(filtros_ativos) if filtros_ativos else " · sem filtros"))
 
-if DF.empty:
-    st.warning("Nenhum registro atende a esta combinação de filtros. Amplie o período ou remova algum filtro.")
-    st.stop()
+def indicadores() -> None:
+    mensal_total = c.serie_mensal(DF, ini, fim).set_index("mes")["total"]
+    k1, k2, k3, k4, k5 = st.columns(5)
+    k1.metric("Registros", fmt_int(len(DF)), border=True,
+              help="Linhas publicadas pela Central 156. Não são protocolos únicos confirmados.")
+    k2.metric(f"Endereços {LIMIAR}+ dias", fmt_int(len(CAND)), border=True,
+              help=f"De {fmt_int(len(END))} endereços identificáveis "
+                   f"({fmt_pct(100 * len(CAND) / max(len(END), 1))}). Conta datas de abertura distintas.")
+    k3.metric("Registros neles", fmt_pct(100 * CAND["registros"].sum() / len(DF)), border=True,
+              help=f"{fmt_int(CAND['registros'].sum())} das {fmt_int(len(DF))} linhas do recorte.")
+    k4.metric("Mês de pico", c.rotulo_mes(mensal_total.idxmax()), border=True,
+              help=f"{fmt_int(mensal_total.max())} registros. A cobertura dos meses não foi comprovada como completa.")
+    k5.metric("Sem coordenadas", fmt_pct(100 * DF["sem_coordenadas"].mean()), border=True,
+              help=f"{fmt_int(DF['sem_coordenadas'].sum())} registros sem latitude e longitude. Continuam em todas "
+                   f"as contagens; a posição não foi estimada.")
 
-# ---------------------------------------------------------------- indicadores
-mensal_total = c.serie_mensal(DF, ini, fim).set_index("mes")["total"]
-k1, k2, k3, k4, k5 = st.columns(5)
-k1.metric("Registros", fmt_int(len(DF)), border=True,
-          help="Linhas publicadas pela Central 156. Não são protocolos únicos confirmados.")
-k2.metric(f"Endereços {LIMIAR}+ dias", fmt_int(len(CAND)), border=True,
-          help=f"De {fmt_int(len(END))} endereços identificáveis "
-               f"({fmt_pct(100 * len(CAND) / max(len(END), 1))}). Conta datas de abertura distintas.")
-k3.metric("Registros neles", fmt_pct(100 * CAND["registros"].sum() / len(DF)), border=True,
-          help=f"{fmt_int(CAND['registros'].sum())} das {fmt_int(len(DF))} linhas do recorte.")
-k4.metric("Mês de pico", c.rotulo_mes(mensal_total.idxmax()), border=True,
-          help=f"{fmt_int(mensal_total.max())} registros. A cobertura dos meses não foi comprovada como completa.")
-k5.metric("Sem coordenadas", fmt_pct(100 * DF["sem_coordenadas"].mean()), border=True,
-          help=f"{fmt_int(DF['sem_coordenadas'].sum())} registros sem latitude e longitude. Continuam em todas "
-               f"as contagens; a posição não foi estimada.")
 
-st.write("")
-aba_rec, aba_ter, aba_tempo, aba_qual, aba_sobre = st.tabs(
-    ["Recorrência", "Território", "Tempo", "Qualidade dos dados", "Sobre os dados"])
+def cabecalho(pergunta: str, nota: str | None = None) -> None:
+    """Modelo comum (entregável 5): pergunta como título, nota, recorte ativo e indicadores."""
+    st.markdown('<p class="marca">Remoção de entulhos · Central 156 do Recife · 2024–2025</p>',
+                unsafe_allow_html=True)
+    st.title(pergunta)
+    if nota:
+        st.markdown(f'<p class="nota">{nota}</p>', unsafe_allow_html=True)
+    st.caption(f"Mostrando **{fmt_int(len(DF))}** de {fmt_int(len(BASE))} registros do recorte · "
+               + descricao_filtros())
+    if DF.empty:
+        st.warning("Nenhum registro atende a esta combinação de filtros. Amplie o período ou remova algum filtro "
+                   "na barra lateral (ou use Limpar filtros).")
+        st.stop()
+    indicadores()
+    st.write("")
+
+
+# ================================================================ 0. Visão geral
+def pagina_visao_geral() -> None:
+    cabecalho("Remoção de entulhos no Recife: onde os chamados se repetem",
+              "Chamados do serviço <b>Remoção de Entulhos</b> (código 6) da Central 156 da Emlurb, com abertura em "
+              "<b>2024 e 2025</b>. Para quem acompanha a limpeza urbana: quais endereços voltam a aparecer, onde os "
+              "registros se concentram e como variam no tempo. <b>Chamados registrados não confirmam descarte "
+              "irregular nem pontos críticos oficiais.</b>")
+    st.markdown("**Três achados deste recorte**")
+    mensal = c.serie_mensal(DF, ini, fim)
+    pico = mensal.loc[mensal["total"].idxmax()]
+    bai = c.por_bairro(DF, END)
+    bai = bai.loc[bai["bairro"] != "NÃO INFORMADO"]
+    rpa = c.por_rpa(DF, END).sort_values("registros", ascending=False).iloc[0]
+
+    c1, c2, c3 = st.columns(3, gap="medium")
+    with c1, st.container(border=True, height="stretch"):
+        st.markdown("**Recorrência**")
+        if END.empty:
+            st.markdown('<p class="nota">Nenhum registro com endereço suficiente neste recorte.</p>',
+                        unsafe_allow_html=True)
+        else:
+            pct = 100 * CAND["registros"].sum() / len(DF)
+            st.markdown(f'<p class="achado-num">{fmt_int(len(CAND))} endereços</p>', unsafe_allow_html=True)
+            st.markdown(f'<p class="nota">voltam em {LIMIAR} dias ou mais e concentram <b>{fmt_pct(pct)}</b> dos '
+                        f'registros. O primeiro é <b>{c.rotulo_endereco(END.iloc[0])}</b>, com '
+                        f'{fmt_int(END.iloc[0]["dias_distintos"])} dias.</p>', unsafe_allow_html=True)
+        st.page_link(PAG_REC, label="Ver endereços que se repetem", icon=":material/arrow_forward:")
+    with c2, st.container(border=True, height="stretch"):
+        st.markdown("**Território**")
+        if bai.empty:
+            st.markdown('<p class="nota">Nenhum bairro reconhecido neste recorte.</p>', unsafe_allow_html=True)
+        else:
+            lb = bai.iloc[0]
+            st.markdown(f'<p class="achado-num">{lb["bairro"]}</p>', unsafe_allow_html=True)
+            st.markdown(f'<p class="nota">lidera com <b>{fmt_int(lb["registros"])}</b> registros '
+                        f'({fmt_pct(lb["pct_registros"])}). Entre as regiões, a <b>RPA {rpa["rpa"]}</b> soma '
+                        f'{fmt_pct(rpa["pct_registros"])}. São volumes, não taxas de risco.</p>',
+                        unsafe_allow_html=True)
+        st.page_link(PAG_TER, label="Ver bairros e RPAs", icon=":material/arrow_forward:")
+    with c3, st.container(border=True, height="stretch"):
+        st.markdown("**Tempo**")
+        st.markdown(f'<p class="achado-num">{c.rotulo_mes(pico["mes"])}</p>', unsafe_allow_html=True)
+        texto = f'é o mês com mais registros (<b>{fmt_int(pico["total"])}</b>).'
+        if fim >= c.INICIO_COBERTURA_LIMITADA:
+            texto += (" A queda depois de set/2025 vem do fim do arquivo de 2025, não de menos demanda.")
+        st.markdown(f'<p class="nota">{texto}</p>', unsafe_allow_html=True)
+        st.page_link(PAG_TEMPO, label="Ver a série mensal", icon=":material/arrow_forward:")
+
+    st.write("")
+    col_a, col_b = st.columns(2, gap="large")
+    with col_a:
+        st.markdown("**Antes de usar estes números**")
+        st.markdown(
+            f'<p class="nota">Faltam coordenadas em <b>{fmt_pct(100 * DF["sem_coordenadas"].mean())}</b> dos '
+            f'registros, por isso o painel ainda não tem mapa. Nenhum mês teve a cobertura comprovada como '
+            f'completa. Registro é uma linha publicada, não um protocolo único.</p>', unsafe_allow_html=True)
+        st.page_link(PAG_QUAL, label="Ver a qualidade dos dados", icon=":material/arrow_forward:")
+    with col_b:
+        st.markdown("**Como usar**")
+        st.markdown(
+            '<p class="nota">Os filtros da barra lateral valem para todas as páginas e continuam ativos quando '
+            'você troca de página. O controle de recorrência define quantos dias distintos um endereço precisa '
+            'ter para contar como recorrente (padrão 3).</p>', unsafe_allow_html=True)
+        st.page_link(PAG_MET, label="Ver fonte, definições e decisões", icon=":material/arrow_forward:")
+
 
 # ================================================================ 1. Recorrência
-with aba_rec:
-    st.markdown('<p class="pergunta"><b>Quais endereços voltam a aparecer em dias diferentes?</b></p>',
-                unsafe_allow_html=True)
-    st.markdown(f'<p class="nota">Endereço = rua e número padronizados + bairro de referência. Contamos as '
-                f'<b>datas de abertura distintas</b>: vários chamados no mesmo dia contam como um dia. '
-                f'Entram só os {fmt_int(DF["endereco_ok"].sum())} registros com endereço suficiente.</p>',
-                unsafe_allow_html=True)
-
+def pagina_recorrencia() -> None:
+    cabecalho("Quais endereços voltam a aparecer em dias diferentes?",
+              f'Endereço = rua e número padronizados + bairro de referência. Contamos as <b>datas de abertura '
+              f'distintas</b>: vários chamados no mesmo dia contam como um dia. Entram só os '
+              f'{fmt_int(DF["endereco_ok"].sum())} registros com endereço suficiente.')
     if END.empty:
         st.info("Nenhum registro com endereço suficiente neste recorte.")
     else:
@@ -334,10 +400,10 @@ with aba_rec:
         baixar_csv(saida, "recorrencia_enderecos_filtrado.csv", "Baixar todos os endereços deste recorte (CSV)",
                    "dl_end")
 
+
 # ================================================================ 2. Território
-with aba_ter:
-    st.markdown('<p class="pergunta"><b>Em quais bairros e regiões os registros se concentram?</b></p>',
-                unsafe_allow_html=True)
+def pagina_territorio() -> None:
+    cabecalho("Em quais bairros e regiões os registros se concentram?")
     escolha = st.segmented_control("Medida", ["Registros", "Endereços recorrentes"], default="Registros",
                                    key="medida_ter", help=f"Endereços recorrentes = endereços com {LIMIAR} ou mais "
                                                           f"dias distintos de abertura (limiar da barra lateral).")
@@ -400,10 +466,10 @@ with aba_ter:
             "% do recorte": st.column_config.NumberColumn(format="%.2f%%")})
         baixar_csv(tb, "registros_por_bairro.csv", "Baixar tabela (CSV)", "dl_bai")
 
+
 # ================================================================ 3. Tempo
-with aba_tempo:
-    st.markdown('<p class="pergunta"><b>Como os registros variam ao longo dos meses?</b></p>',
-                unsafe_allow_html=True)
+def pagina_tempo() -> None:
+    cabecalho("Como os registros variam ao longo dos meses?")
     separar = st.toggle("Separar por arquivo de origem", value=True,
                         help="Mostra de qual CSV publicado veio cada registro. A fonte 2025 termina em 10/09/2025.")
     men = c.serie_mensal(DF, ini, fim)
@@ -452,10 +518,10 @@ with aba_tempo:
         st.dataframe(tm, hide_index=True)
         baixar_csv(tm, "registros_por_mes.csv", "Baixar tabela (CSV)", "dl_mes")
 
+
 # ================================================================ 4. Qualidade
-with aba_qual:
-    st.markdown('<p class="pergunta"><b>Quanto podemos confiar em cada campo deste recorte?</b></p>',
-                unsafe_allow_html=True)
+def pagina_qualidade() -> None:
+    cabecalho("Quanto podemos confiar em cada campo deste recorte?")
     col_a, col_b = st.columns([1.2, 1], gap="large")
     with col_a:
         st.markdown("**Registros com e sem coordenadas, por arquivo de origem**")
@@ -496,8 +562,30 @@ with aba_qual:
                 'preenchido por estimativa: média de coordenadas inventaria posições, número escolhido inventaria '
                 'endereços e data substituída mudaria o período.</p>', unsafe_allow_html=True)
 
-# ================================================================ 5. Sobre
-with aba_sobre:
+
+# ================================================================ 5. Metodologia
+HISTORICO_DECISOES = pd.DataFrame([
+    ("Sprint 2 · Preparação", "Recorte no serviço 6 (Remoção de Entulhos) e aberturas em 2024–2025.",
+     "O grupo 2 mistura serviços diferentes; o ano do arquivo não é o ano de abertura."),
+    ("Sprint 2 · Preparação", "Ausências mantidas: nenhuma coordenada, número ou data estimada.",
+     "Estimar inventaria posições e endereços."),
+    ("Sprint 2 · Preparação", "Mesmo endereço e dia sinalizado, não excluído.",
+     "Não há protocolo global para confirmar duplicatas."),
+    ("Sprint 3 · EDA", "Recorrência = datas de abertura distintas por endereço; limiar preliminar de 3 dias.",
+     "Vários chamados no mesmo dia não inflam a recorrência."),
+    ("Sprint 3 · EDA", "Nenhum extremo removido pela regra do IQR.",
+     "Com Q1 = Q3 = 1, a regra marcaria todo endereço com mais de um dia."),
+    ("Entregável 4 · Dashboard v1", "Streamlit, filtros globais e painel sem mapa.",
+     "53,8% sem coordenadas e coordenadas ainda não validadas no território."),
+    ("Entregável 5 · Proposta", "Seis páginas com o mesmo modelo e uma Visão geral na entrada.",
+     "Quem acompanha a limpeza urbana precisa do resumo antes do detalhe."),
+    ("Entregável 6 · Consolidado", "Navegação por páginas implementada; mapa continua adiado.",
+     "A validação territorial das coordenadas ainda não foi feita."),
+], columns=["Etapa", "Decisão", "Por quê"])
+
+
+def pagina_metodologia() -> None:
+    cabecalho("De onde vêm os dados e o que o painel não afirma?")
     col_a, col_b = st.columns([1.2, 1], gap="large")
     with col_a:
         st.markdown("#### Fonte e recorte")
@@ -552,6 +640,36 @@ with aba_sobre:
             "- Revisar com a fonte os endereços extremos e as possíveis grafias duplicadas.\n"
             "- Testar o painel com usuários (entregável 7) e ajustar a leitura e os filtros.")
         st.caption(f"Entrada: {META['entrada']} · SHA-256 {META['sha256_entrada'][:16]}…")
+
+    st.divider()
+    st.markdown("#### Histórico de decisões")
+    st.dataframe(HISTORICO_DECISOES, hide_index=True, column_config={
+        "Etapa": st.column_config.TextColumn(width=190),
+        "Decisão": st.column_config.TextColumn(width="large"),
+        "Por quê": st.column_config.TextColumn(width="large")})
+    st.markdown("#### Baixar a base filtrada")
+    st.markdown(f'<p class="nota">{fmt_int(len(DF))} registros com os filtros atuais, com os campos originais '
+                f'e os padronizados. A base derivada segue a licença ODbL: cite a fonte e compartilhe pela mesma '
+                f'licença.</p>', unsafe_allow_html=True)
+    colunas = ["id_fonte", "arquivo", "abertura", "situacao", "rua_informada", "numero_informado",
+               "bairro_informado", "rua", "numero", "bairro", "rpa", "endereco_ok", "sem_coordenadas",
+               "latitude", "longitude", "mesmo_endereco_dia"]
+    base_csv = DF[colunas].assign(abertura=DF["abertura"].dt.strftime("%d/%m/%Y"))
+    baixar_csv(base_csv, "entulhos_recife_filtrado.csv", "Baixar base filtrada (CSV)", "dl_base")
+
+
+# ---------------------------------------------------------------- navegação
+PAG_VISAO = st.Page(pagina_visao_geral, title="Visão geral", icon=":material/dashboard:",
+                    url_path="visao-geral", default=True)
+PAG_REC = st.Page(pagina_recorrencia, title="Recorrência", icon=":material/repeat:", url_path="recorrencia")
+PAG_TER = st.Page(pagina_territorio, title="Território", icon=":material/location_city:", url_path="territorio")
+PAG_TEMPO = st.Page(pagina_tempo, title="Tempo", icon=":material/calendar_month:", url_path="tempo")
+PAG_QUAL = st.Page(pagina_qualidade, title="Qualidade dos dados", icon=":material/fact_check:",
+                   url_path="qualidade")
+PAG_MET = st.Page(pagina_metodologia, title="Metodologia e fonte", icon=":material/info:", url_path="metodologia")
+
+navegacao = st.navigation([PAG_VISAO, PAG_REC, PAG_TER, PAG_TEMPO, PAG_QUAL, PAG_MET], position="top")
+navegacao.run()
 
 st.divider()
 st.caption("Fonte: Portal de Dados Abertos do Recife — Central de Atendimento de Serviços da Emlurb (156), licença ODbL. "
