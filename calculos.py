@@ -16,7 +16,7 @@ from pathlib import Path
 import pandas as pd
 
 RAIZ = Path(__file__).resolve().parent
-ARQUIVO_PAINEL = RAIZ / "dados" / "painel" / "entulhos_painel.parquet"
+ARQUIVO_PAINEL = RAIZ / "dados" / "painel" / "entulhos_painel.csv.gz"
 ARQUIVO_META = RAIZ / "dados" / "painel" / "metadados.json"
 
 CHAVE_ENDERECO = ["rua", "numero", "bairro"]
@@ -32,14 +32,27 @@ def rotulo_mes(p: pd.Period) -> str:
     return f"{NOMES_MESES[p.month - 1]}/{p.year}"
 
 
-def carregar_recorte() -> pd.DataFrame:
-    """Registros de entulhos com abertura em 2024 ou 2025 (recorte principal do projeto)."""
-    df = pd.read_parquet(ARQUIVO_PAINEL)
-    df = df.loc[df["no_recorte"].astype(bool)].copy()
+BOOLEANAS = ["no_recorte", "bairro_reconhecido", "endereco_ok", "sem_coordenadas", "mesmo_endereco_dia", "unico"]
+
+
+def carregar_publicados() -> pd.DataFrame:
+    """Todas as linhas publicadas do recorte 2024–2025, inclusive as repetidas (para a página de qualidade)."""
+    df = pd.read_csv(ARQUIVO_PAINEL, dtype=str, keep_default_na=False)
+    for col in BOOLEANAS:
+        df[col] = df[col].map({"True": True, "False": False}).astype(bool)
+    for col in ["abertura", "ultima_atualizacao"]:
+        df[col] = pd.to_datetime(df[col], format="%Y-%m-%d", errors="coerce")
+    for col in ["latitude", "longitude"]:
+        df[col] = pd.to_numeric(df[col].replace("", None), errors="coerce")
+    df = df.loc[df["no_recorte"]].copy()
     df["mes"] = df["abertura"].dt.to_period("M")
-    for c in ["endereco_ok", "sem_coordenadas", "mesmo_endereco_dia"]:
-        df[c] = df[c].astype(bool)
     return df.reset_index(drop=True)
+
+
+def carregar_recorte() -> pd.DataFrame:
+    """Chamados únicos com abertura em 2024 ou 2025 (recorte principal do projeto, sem repetições)."""
+    df = carregar_publicados()
+    return df.loc[df["unico"]].reset_index(drop=True)
 
 
 def carregar_metadados() -> dict:
@@ -130,9 +143,18 @@ def coordenadas_por_fonte(df: pd.DataFrame) -> pd.DataFrame:
     return g
 
 
-def quadro_qualidade(df: pd.DataFrame) -> pd.DataFrame:
+def quadro_qualidade(df: pd.DataFrame, rep: dict | None = None) -> pd.DataFrame:
+    """Problemas por campo. `df` = chamados únicos; `rep` = resumo de repetições das linhas publicadas."""
     n = len(df)
-    itens = [
+    itens = []
+    if rep is not None:
+        itens += [
+            ("Repetição", "Mesmo chamado publicado em outro arquivo", rep["republicadas"],
+             "Contado uma vez; fica a versão do arquivo mais recente."),
+            ("Repetição", "Mais de um chamado no mesmo endereço e dia", rep["mesmo_dia"],
+             "Contado como uma ocorrência; as linhas seguem marcadas na planilha."),
+        ]
+    itens += [
         ("Coordenadas", "Sem latitude e longitude", int(df["sem_coordenadas"].sum()),
          "Mantido; posição não estimada."),
         ("Endereço", "Insuficiente para comparar endereços", int((~df["endereco_ok"]).sum()),
@@ -143,11 +165,103 @@ def quadro_qualidade(df: pd.DataFrame) -> pd.DataFrame:
          "Zero não identifica o local."),
         ("Número", "Formato que precisa de revisão", int(df["conferencia_numero"].eq("Precisa de revisão").sum()),
          "Texto preservado; nenhum número escolhido."),
-        ("Repetições", "Outro registro no mesmo endereço e dia", int(df["mesmo_endereco_dia"].sum()),
-         "Sinalizado, não excluído; conta 1 dia na recorrência."),
         ("Bairro", "Não reconhecido na lista de referência", int((~df["bairro_reconhecido"]).sum()),
          "Mantido como NÃO INFORMADO; RPA informada preservada."),
     ]
-    q = pd.DataFrame(itens, columns=["Campo", "O que foi encontrado", "Registros", "Decisão"])
-    q["% do filtro"] = 100 * q["Registros"] / max(n, 1)
-    return q[["Campo", "O que foi encontrado", "Registros", "% do filtro", "Decisão"]]
+    q = pd.DataFrame(itens, columns=["Campo", "O que foi encontrado", "Chamados", "Decisão"])
+    base = q["Chamados"].astype(float)
+    if rep is not None:
+        base.iloc[:2] = base.iloc[:2] / max(rep["publicadas"], 1) * 100
+        base.iloc[2:] = base.iloc[2:] / max(n, 1) * 100
+    else:
+        base = base / max(n, 1) * 100
+    q["%"] = base
+    return q[["Campo", "O que foi encontrado", "Chamados", "%", "Decisão"]]
+
+
+# ---------------------------------------------------------------- ajustes da revisão (entregável 7)
+FAIXAS_DIAS = [(3, 3, "3 dias"), (4, 4, "4 dias"), (5, 5, "5 dias"), (6, 10, "6 a 10 dias"),
+               (11, 20, "11 a 20 dias"), (21, 10_000, "21 dias ou mais")]
+
+
+def faixas_recorrentes(candidatos: pd.DataFrame, limiar: int = LIMIAR_PADRAO) -> pd.DataFrame:
+    """Endereços recorrentes por faixa de dias com chamado (só os que atingem o limiar)."""
+    faixas = [(max(a, limiar), b, r) for a, b, r in FAIXAS_DIAS if b >= limiar]
+    faixas = [(a, b, (f"{a} dias" if a == b else (f"{a} dias ou mais" if b >= 10_000 else f"{a} a {b} dias")))
+              for a, b, _ in faixas]
+    linhas = []
+    for a, b, rotulo in faixas:
+        m = candidatos["dias_distintos"].between(a, b)
+        linhas.append({"faixa": rotulo, "enderecos": int(m.sum()), "chamados": int(candidatos.loc[m, "registros"].sum())})
+    return pd.DataFrame(linhas)
+
+
+def coerencia_enderecos(df: pd.DataFrame, enderecos: pd.DataFrame) -> pd.DataFrame:
+    """Para cada endereço, a distância (m) das coordenadas dos chamados até o centro (mediana) do endereço.
+
+    Serve para checar se a identificação textual aponta para um mesmo lugar. Só entram endereços com
+    pelo menos 2 chamados com coordenadas dentro do retângulo aproximado do Recife.
+    """
+    colunas = CHAVE_ENDERECO + ["com_coordenadas", "distancia_mediana_m", "distancia_max_m"]
+    if enderecos.empty:
+        return pd.DataFrame(columns=colunas)
+    e = df.loc[df["endereco_ok"]].merge(enderecos[CHAVE_ENDERECO], on=CHAVE_ENDERECO)
+    e = e.loc[e["latitude"].between(-8.17, -7.92) & e["longitude"].between(-35.03, -34.84)]
+    if e.empty:
+        return pd.DataFrame(columns=colunas)
+    centro = e.groupby(CHAVE_ENDERECO)[["latitude", "longitude"]].transform("median")
+    import numpy as np
+    dist = np.hypot((e["latitude"] - centro["latitude"]) * 111_000,
+                    (e["longitude"] - centro["longitude"]) * 111_000 * np.cos(np.radians(8.05)))
+    out = (e.assign(dist=dist).groupby(CHAVE_ENDERECO)
+           .agg(com_coordenadas=("dist", "size"), distancia_mediana_m=("dist", "median"),
+                distancia_max_m=("dist", "max")).reset_index())
+    return out.loc[out["com_coordenadas"] >= 2].reset_index(drop=True)[colunas]
+
+
+def bairros_da_rpa(df: pd.DataFrame, enderecos: pd.DataFrame, rpa: str) -> pd.DataFrame:
+    """Bairros de uma RPA com o peso de cada um dentro da RPA."""
+    b = por_bairro(df.loc[df["rpa"] == rpa], enderecos.loc[enderecos["rpa"] == rpa])
+    total = b["registros"].sum()
+    total_rec = b["enderecos_recorrentes"].sum()
+    b["pct_rpa"] = 100 * b["registros"] / max(total, 1)
+    b["pct_rpa_recorrentes"] = 100 * b["enderecos_recorrentes"] / max(total_rec, 1)
+    return b
+
+
+def bairro_lider_por_rpa(df: pd.DataFrame, enderecos: pd.DataFrame, campo: str = "registros") -> pd.DataFrame:
+    linhas = []
+    for rpa in RPAS:
+        b = bairros_da_rpa(df, enderecos, rpa)
+        b = b.loc[b["bairro"] != "NÃO INFORMADO"]
+        if b.empty or b[campo].sum() == 0:
+            continue
+        pct = "pct_rpa" if campo == "registros" else "pct_rpa_recorrentes"
+        topo = b.sort_values(campo, ascending=False).iloc[0]
+        linhas.append({"rpa": rpa, "bairro": topo["bairro"], "valor": int(topo[campo]), "pct_rpa": topo[pct],
+                       "total_rpa": int(b[campo].sum()), "bairros": int(len(b))})
+    return pd.DataFrame(linhas)
+
+
+def mes_por_ano(df: pd.DataFrame) -> pd.DataFrame:
+    """Tabela com os meses nas linhas (jan–dez) e os anos nas colunas."""
+    t = pd.crosstab(df["abertura"].dt.month, df["abertura"].dt.year).reindex(range(1, 13), fill_value=0)
+    for ano in (2024, 2025):
+        if ano not in t.columns:
+            t[ano] = 0
+    t = t[[2024, 2025]]
+    t.index = [NOMES_MESES[m - 1] for m in t.index]
+    t.index.name = "mes"
+    return t
+
+
+def repeticoes(publicados: pd.DataFrame) -> dict:
+    """Resumo do tratamento de repetições para um recorte de linhas publicadas."""
+    t = publicados["tipo_repeticao"]
+    return {
+        "publicadas": len(publicados),
+        "republicadas": int(t.eq("Republicado em outro arquivo").sum()),
+        "mesmo_dia": int(t.eq("Mesmo endereço e dia").sum()),
+        "unicos": int(publicados["unico"].sum()),
+        "grupos": int(publicados.loc[publicados["grupo_repeticao"].ne(""), "grupo_repeticao"].nunique()),
+    }

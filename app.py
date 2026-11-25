@@ -551,12 +551,12 @@ def pagina_qualidade() -> None:
 
     st.markdown("**Problemas encontrados e decisão tomada**")
     q = c.quadro_qualidade(DF)
-    q["Registros"] = q["Registros"].map(fmt_int)
+    q["Chamados"] = q["Chamados"].map(fmt_int)
     st.dataframe(q, hide_index=True, column_config={
         "Campo": st.column_config.TextColumn(width=110),
         "O que foi encontrado": st.column_config.TextColumn(width=270),
-        "Registros": st.column_config.TextColumn(width=90),
-        "% do filtro": st.column_config.ProgressColumn(format="%.1f%%", min_value=0, max_value=100, width=140),
+        "Chamados": st.column_config.TextColumn(width=90),
+        "%": st.column_config.ProgressColumn(format="%.1f%%", min_value=0, max_value=100, width=140),
         "Decisão": st.column_config.TextColumn(width="large")})
     st.markdown('<p class="nota">Um mesmo registro pode ter mais de um problema. Nenhum valor ausente foi '
                 'preenchido por estimativa: média de coordenadas inventaria posições, número escolhido inventaria '

@@ -1,15 +1,18 @@
 """Etapa de preparação do painel (dado tratado -> dado do painel).
 
-Entrada : dados/entrada/dados_recife(4).xlsx  (planilha final da Sprint 2, aba "Entulhos tratados")
-Saída   : dados/painel/entulhos_painel.parquet
+Entrada : dados/entrada/dados_recife(5).xlsx  (planilha da Sprint 2 + tratamento de repetições,
+          gerada por tratar_repeticoes.py a partir da dados_recife(4).xlsx)
+Saída   : dados/painel/entulhos_painel.csv.gz
 
 O script NÃO altera a entrada. Ele apenas:
   * lê a aba "Entulhos tratados" como texto (preserva SN, zeros e espaços);
   * converte datas, Sim/Não e coordenadas em cópias tipadas;
   * mantém somente as colunas que o painel usa, com nomes curtos;
-  * confere as contagens conhecidas da Sprint 2 e para se algo divergir.
+  * leva as marcações de repetição (chamado único, tipo e grupo);
+  * confere as contagens conhecidas da Sprint 2 e do tratamento de repetições e para se algo divergir.
 
-Uso:  python preparar_dados.py
+Uso:  python tratar_repeticoes.py   (só quando a planilha (4) mudar)
+      python preparar_dados.py
 """
 from __future__ import annotations
 
@@ -22,8 +25,8 @@ from pathlib import Path
 import pandas as pd
 
 RAIZ = Path(__file__).resolve().parent
-ENTRADA = RAIZ / "dados" / "entrada" / "dados_recife(4).xlsx"
-SAIDA = RAIZ / "dados" / "painel" / "entulhos_painel.parquet"
+ENTRADA = RAIZ / "dados" / "entrada" / "dados_recife(5).xlsx"
+SAIDA = RAIZ / "dados" / "painel" / "entulhos_painel.csv.gz"
 METADADOS = RAIZ / "dados" / "painel" / "metadados.json"
 
 # Contagens publicadas no Plano de Preparação (Sprint 2). Servem de trava.
@@ -33,6 +36,10 @@ ESPERADO = {
     "endereco_suficiente": 17_134,
     "sem_coordenadas": 10_929,
     "mesmo_endereco_dia": 1_218,
+    # Tratamento de repetições (tratar_repeticoes.py), no recorte 2024–2025:
+    "chamados_unicos": 19_643,
+    "republicados": 266,
+    "mesmo_endereco_dia_removidos": 391,
 }
 
 
@@ -86,6 +93,9 @@ def main() -> None:
         "latitude": lat,
         "longitude": lon,
         "mesmo_endereco_dia": ler_sim_nao(base["Mesmo endereço e dia?"], aceita_vazio=True).fillna(False),
+        "unico": ler_sim_nao(base["Conta como chamado único?"]),
+        "tipo_repeticao": texto("Tipo de repetição"),
+        "grupo_repeticao": texto("Grupo de repetição"),
     })
 
     # Travas: se a entrada mudou, o painel não é gerado.
@@ -96,6 +106,9 @@ def main() -> None:
         "endereco_suficiente": int(recorte["endereco_ok"].sum()),
         "sem_coordenadas": int(recorte["sem_coordenadas"].sum()),
         "mesmo_endereco_dia": int(recorte["mesmo_endereco_dia"].sum()),
+        "chamados_unicos": int(recorte["unico"].sum()),
+        "republicados": int(recorte["tipo_repeticao"].eq("Republicado em outro arquivo").sum()),
+        "mesmo_endereco_dia_removidos": int(recorte["tipo_repeticao"].eq("Mesmo endereço e dia").sum()),
     }
     divergentes = {k: (obtido[k], v) for k, v in ESPERADO.items() if obtido[k] != v}
     if divergentes:
@@ -106,7 +119,8 @@ def main() -> None:
     assert not painel.duplicated(["arquivo", "id_fonte"]).any()
 
     SAIDA.parent.mkdir(parents=True, exist_ok=True)
-    painel.to_parquet(SAIDA, index=False)
+    # CSV compactado: lido só com pandas (sem pyarrow). Datas em ISO; Sim/Não como True/False.
+    painel.to_csv(SAIDA, index=False, compression="gzip", date_format="%Y-%m-%d")
 
     fontes = pd.read_excel(ENTRADA, sheet_name="Fontes e períodos", dtype=object, keep_default_na=False)
     fontes = fontes.loc[fontes["Arquivo"].astype("string").str.strip().ne("")]

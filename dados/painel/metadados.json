@@ -1,12 +1,15 @@
 {
-  "entrada": "dados_recife(4).xlsx",
-  "sha256_entrada": "d4e6fb2d29695109f76b6353a75c0c9cfaea7bad91540314b73226aa62212d5a",
+  "entrada": "dados_recife(5).xlsx",
+  "sha256_entrada": "7e8f47df1eb9d6b13bd26dbaef8884ee3d2354fbcf6caaa2198f3df60f810be4",
   "contagens": {
     "linhas_base": 21646,
     "linhas_recorte": 20300,
     "endereco_suficiente": 17134,
     "sem_coordenadas": 10929,
-    "mesmo_endereco_dia": 1218
+    "mesmo_endereco_dia": 1218,
+    "chamados_unicos": 19643,
+    "republicados": 266,
+    "mesmo_endereco_dia_removidos": 391
   },
   "fontes": [
     {
