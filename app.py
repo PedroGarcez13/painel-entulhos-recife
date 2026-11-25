@@ -274,8 +274,8 @@ def pagina_visao_geral() -> None:
         st.markdown(
             f'<p class="nota">As {fmt_int(rep["publicadas"])} linhas publicadas viraram <b>{fmt_int(rep["unicos"])} '
             f'chamados</b> depois de tirar as repetições. Faltam coordenadas em '
-            f'<b>{fmt_pct(100 * DF["sem_coordenadas"].mean())}</b> dos chamados, por isso o painel ainda não tem '
-            f'mapa. Nenhum mês teve a cobertura comprovada como completa.</p>', unsafe_allow_html=True)
+            f'<b>{fmt_pct(100 * DF["sem_coordenadas"].mean())}</b> dos chamados; por isso o mapa pinta os bairros pelo '
+            f'bairro informado, não pela coordenada. Nenhum mês teve a cobertura comprovada como completa.</p>', unsafe_allow_html=True)
         st.page_link(PAG_QUAL, label="Ver a qualidade dos dados", icon=":material/arrow_forward:")
     with col_b:
         subtitulo("Como usar")
@@ -284,6 +284,128 @@ def pagina_visao_geral() -> None:
             'você troca de página. O último controle define quantos dias com chamado um endereço precisa ter '
             'para contar como recorrente (padrão 3).</p>', unsafe_allow_html=True)
         st.page_link(PAG_MET, label="Ver fonte, definições e decisões", icon=":material/arrow_forward:")
+
+
+# ================================================================ Mapa
+MAPA = c.carregar_mapa()
+ESCALA_AZUL = [[0, "#e6eef8"], [0.35, "#9cc0ea"], [0.7, "#3d7fd0"], [1, "#0b3d82"]]
+CENTRO_RECIFE = dict(lat=-8.045, lon=-34.925)
+
+
+def pagina_mapa() -> None:
+    cabecalho("Onde estão os chamados no mapa do Recife?",
+              "Cada bairro é pintado pela quantidade de chamados. A cor usa o <b>bairro informado no chamado</b>, "
+              "então entram também os chamados sem coordenadas. Passe o mouse sobre um bairro para ver os números.")
+    c1, c2, c3 = st.columns([1, 1.6, 1.2])
+    nivel = c1.segmented_control("Pintar por", ["Bairro", "RPA"], default="Bairro", key="mapa_nivel") or "Bairro"
+    medidas = {"Chamados": "chamados", "Chamados por km²": "por_km2", "Endereços recorrentes": "recorrentes"}
+    medida = c2.segmented_control("Medida", list(medidas), default="Chamados", key="mapa_medida",
+                                  help="Chamados por km² divide os chamados pela área do bairro (ou da RPA): "
+                                       "compara regiões de tamanhos diferentes.") or "Chamados"
+    com_pontos = c3.toggle("Mostrar endereços recorrentes", value=True, key="mapa_pontos",
+                           help=f"Pontos laranja = endereços com {LIMIAR}+ dias de chamado cuja coordenada cai no "
+                                f"próprio bairro. Quanto maior o ponto, mais dias.")
+    campo = medidas[medida]
+    tab = c.tabela_mapa(DF, END, MAPA)
+    selecionados = set(tab["bairro"])
+    if st.session_state["f_rpa"]:
+        selecionados &= set(tab.loc[tab["rpa"].isin(st.session_state["f_rpa"]), "bairro"])
+    if st.session_state["f_bairro"]:
+        selecionados &= set(st.session_state["f_bairro"])
+    tab_sel = tab.loc[tab["bairro"].isin(selecionados)].copy()
+    if nivel == "RPA":
+        tab_sel["valor"] = tab_sel["rpa_" + campo]
+    else:
+        tab_sel["valor"] = tab_sel[campo]
+    unidade = {"chamados": "chamados", "por_km2": "chamados/km²", "recorrentes": "endereços recorrentes"}[campo]
+
+    fig = go.Figure()
+    # Camada de fundo: todos os bairros em cinza claro (os de fora do filtro ficam só nela).
+    fig.add_trace(go.Choroplethmap(
+        geojson=MAPA, featureidkey="properties.bairro", locations=tab["bairro"], z=[0] * len(tab),
+        colorscale=[[0, "#ecebe7"], [1, "#ecebe7"]], showscale=False, marker_opacity=0.55,
+        marker_line_width=0.6, marker_line_color="white", hoverinfo="skip"))
+    if not tab_sel.empty and tab_sel["valor"].max() > 0:
+        if nivel == "RPA":
+            hover = ("<b>RPA %{customdata[1]}</b> · bairro %{customdata[0]}<br>"
+                     "%{customdata[4]:,} chamados (%{customdata[5]:.1f}% do recorte)<br>"
+                     "%{customdata[6]:,} endereços recorrentes<br>%{customdata[7]:.1f} chamados/km²<extra></extra>")
+            dados_hover = list(zip(tab_sel["nome"], tab_sel["rpa"], tab_sel["area_km2"], tab_sel["valor"],
+                                   tab_sel["rpa_chamados"], tab_sel["rpa_pct"], tab_sel["rpa_recorrentes"],
+                                   tab_sel["rpa_por_km2"]))
+        else:
+            hover = ("<b>%{customdata[0]}</b> · RPA %{customdata[1]}<br>"
+                     "%{customdata[4]:,} chamados (%{customdata[5]:.1f}% do recorte)<br>"
+                     "%{customdata[6]:,} endereços recorrentes<br>"
+                     "%{customdata[7]:.1f} chamados/km² · área %{customdata[2]:.2f} km²<extra></extra>")
+            dados_hover = list(zip(tab_sel["nome"], tab_sel["rpa"], tab_sel["area_km2"], tab_sel["valor"],
+                                   tab_sel["chamados"], tab_sel["pct"], tab_sel["recorrentes"], tab_sel["por_km2"]))
+        fig.add_trace(go.Choroplethmap(
+            geojson=MAPA, featureidkey="properties.bairro", locations=tab_sel["bairro"], z=tab_sel["valor"],
+            zmin=0, zmax=float(tab_sel["valor"].max()), colorscale=ESCALA_AZUL, marker_opacity=0.78,
+            marker_line_width=0.8 if nivel == "Bairro" else 0.3, marker_line_color="white",
+            customdata=dados_hover, hovertemplate=hover,
+            colorbar=dict(title=dict(text=unidade, side="right", font=dict(color=TINTA_2, size=12)),
+                          thickness=12, len=0.75, x=1.0, tickfont=dict(color=TINTA_2, size=11),
+                          separatethousands=True)))
+    pontos = c.pontos_recorrentes(DF, CAND) if com_pontos else pd.DataFrame()
+    if not pontos.empty:
+        tamanho = 5 + 18 * (pontos["dias_distintos"] / pontos["dias_distintos"].max()) ** 0.5
+        fig.add_trace(go.Scattermap(
+            lat=pontos["latitude"], lon=pontos["longitude"], mode="markers", name="Endereço recorrente",
+            marker=dict(size=tamanho, color="#eb6834", opacity=0.85),
+            customdata=list(zip([c.rotulo_endereco(r) for _, r in pontos.iterrows()], pontos["dias_distintos"])),
+            hovertemplate="<b>%{customdata[0]}</b><br>%{customdata[1]} dias com chamado<extra></extra>"))
+    fig.update_layout(
+        map=dict(style="carto-positron", center=CENTRO_RECIFE, zoom=10.7),
+        height=640, margin=dict(l=0, r=0, t=0, b=0), paper_bgcolor="rgba(0,0,0,0)", showlegend=False,
+        separators=",.", hoverlabel=dict(bgcolor="white", bordercolor=EIXO, font=dict(color=TINTA, size=13)),
+        font=dict(family="system-ui, -apple-system, 'Segoe UI', sans-serif", color=TINTA))
+    st.plotly_chart(fig, theme=None, config={**CONFIG_PLOTLY, "scrollZoom": True}, key="mapa_recife")
+
+    # ---- leitura
+    if tab_sel.empty or tab_sel["chamados"].sum() == 0:
+        leitura("Nenhum chamado com bairro reconhecido nos bairros deste recorte.")
+    elif nivel == "RPA":
+        rp = tab_sel.groupby("rpa").first().reset_index()
+        topo = rp.sort_values("rpa_chamados", ascending=False).iloc[0]
+        dens = rp.sort_values("rpa_por_km2", ascending=False).iloc[0]
+        leitura(f"Em volume, a <b>RPA {topo['rpa']}</b> tem mais chamados ({fmt_int(topo['rpa_chamados'])}). "
+                f"Por área, a mais concentrada é a <b>RPA {dens['rpa']}</b>, com "
+                f"{fmt_valor_dec(dens['rpa_por_km2'])} chamados/km²"
+                + (f", contra {fmt_valor_dec(rp['rpa_por_km2'].median())} na RPA típica." if len(rp) > 2 else "."))
+    else:
+        topo = tab_sel.sort_values("chamados", ascending=False).iloc[0]
+        dens = tab_sel.loc[tab_sel["chamados"] >= 30].sort_values("por_km2", ascending=False)
+        texto = (f"Em volume, <b>{topo['nome']}</b> (RPA {topo['rpa']}) tem mais chamados "
+                 f"({fmt_int(topo['chamados'])}).")
+        if not dens.empty:
+            d = dens.iloc[0]
+            texto += (f" Por área, o mais concentrado é <b>{d['nome']}</b> (RPA {d['rpa']}), com "
+                      f"{fmt_valor_dec(d['por_km2'])} chamados/km², em só {fmt_valor_dec(d['area_km2'], 2)} km².")
+        leitura(texto)
+    n_pontos = len(pontos) if com_pontos else 0
+    limite("a cor mostra volume ou concentração, não risco: os bairros têm populações diferentes, e a população "
+           "ainda não entrou na análise. "
+           + (f"Os pontos mostram {fmt_int(n_pontos)} dos {fmt_int(len(CAND))} endereços recorrentes: só os que têm "
+              f"coordenada dentro do próprio bairro. " if com_pontos else "")
+           + "Contornos: mapa oficial de bairros da Prefeitura (Portal de Dados Abertos, ODbL), simplificado em ~5 m.")
+
+    with st.expander("Ver tabela por bairro (com área e chamados por km²)"):
+        tt = tab_sel.sort_values("chamados", ascending=False)[
+            ["nome", "rpa", "chamados", "pct", "recorrentes", "area_km2", "por_km2"]].rename(columns={
+                "nome": "Bairro", "rpa": "RPA", "chamados": "Chamados", "pct": "% do recorte",
+                "recorrentes": f"Endereços recorrentes ({LIMIAR}+ dias)", "area_km2": "Área (km²)",
+                "por_km2": "Chamados por km²"})
+        st.dataframe(tt, hide_index=True, column_config={
+            "% do recorte": st.column_config.NumberColumn(format="%.2f%%"),
+            "Área (km²)": st.column_config.NumberColumn(format="%.2f"),
+            "Chamados por km²": st.column_config.NumberColumn(format="%.1f")})
+        baixar_csv(tt, "chamados_por_bairro_mapa.csv", "Baixar tabela (CSV)", "dl_mapa")
+
+
+def fmt_valor_dec(v: float, casas: int = 1) -> str:
+    return f"{v:,.{casas}f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 
 # ================================================================ 1. Endereços que se repetem
@@ -654,7 +776,32 @@ def pagina_qualidade() -> None:
                 f"aparece nos três arquivos e também em endereços completos, então endereço incompleto não explica "
                 f"todos os casos.")
         limite("os arquivos não registram o motivo da falta. Usar só chamados com coordenadas descartaria mais da "
-               "metade da base. Por isso esta versão <b>não tem mapa</b>.")
+               "metade da base. Por isso o mapa pinta os bairros pelo <b>bairro informado</b>, não pela coordenada.")
+
+    subtitulo("As coordenadas caem no bairro informado?")
+    conf = c.conferencia_coordenadas(DF)
+    com_coord = conf.loc[conf["situacao"] != "Sem coordenadas"]
+    col_a, col_b = st.columns([1.2, 1], gap="large")
+    with col_a:
+        cores_conf = {"No bairro informado": AZUL, "Em outro bairro": "#eb6834", "Fora do Recife": "#b3261e"}
+        fig = go.Figure(go.Bar(
+            y=com_coord["situacao"], x=com_coord["chamados"], orientation="h",
+            marker_color=[cores_conf[s] for s in com_coord["situacao"]],
+            text=[f"{fmt_int(v)}  ({fmt_pct(p)})" for v, p in zip(com_coord["chamados"], com_coord["pct_com_coord"])],
+            textposition="outside", cliponaxis=False, textfont=dict(color=TINTA_2, size=12),
+            hovertemplate="%{y}: %{x:,} chamados<extra></extra>"))
+        fig.update_yaxes(categoryorder="array", categoryarray=list(com_coord["situacao"])[::-1])
+        fig.update_xaxes(title_text="Chamados com coordenadas", rangemode="tozero",
+                         range=[0, max(com_coord["chamados"].max(), 1) * 1.35])
+        grade_valores(fig, "x")
+        mostrar(estilo(fig, 230), "conf_coord")
+    with col_b:
+        no_b = conf.set_index("situacao").loc["No bairro informado"]
+        leitura(f"Cruzamos cada coordenada com o mapa oficial de bairros da Prefeitura. "
+                f"<b>{fmt_pct(no_b['pct_com_coord'])}</b> dos chamados com coordenadas caem no bairro informado. "
+                f"Os que caem em outro bairro costumam estar perto da divisa, em um bairro vizinho.")
+        limite("a coordenada pode ser de onde a pessoa estava ao abrir o chamado, não do entulho. Nenhuma "
+               "coordenada foi corrigida; a conferência só marca cada caso.")
 
     st.divider()
     subtitulo("3. Todos os problemas encontrados e a decisão tomada")
@@ -687,8 +834,8 @@ HISTORICO_DECISOES = pd.DataFrame([
      "53,8% sem coordenadas e coordenadas ainda não validadas no território."),
     ("Entregável 5 · Proposta", "Seis páginas com o mesmo modelo e uma Visão geral na entrada.",
      "Quem acompanha a limpeza urbana precisa do resumo antes do detalhe."),
-    ("Entregável 6 · Consolidado", "Navegação por páginas implementada; mapa continua adiado.",
-     "A validação territorial das coordenadas ainda não foi feita."),
+    ("Entregável 6 · Consolidado", "Navegação por páginas implementada; mapa adiado.",
+     "A validação territorial das coordenadas ainda não tinha sido feita."),
     ("Revisão do professor", "Três arquivos juntos e repetições tratadas: 20.300 linhas viram 19.643 chamados únicos.",
      "O mesmo chamado aparecia em dois arquivos, e havia vários chamados no mesmo endereço e dia."),
     ("Revisão do professor", "Recorrência mostrada só entre os endereços com 3+ dias; ranking fixo nos 10 primeiros.",
@@ -699,6 +846,10 @@ HISTORICO_DECISOES = pd.DataFrame([
      "Responder qual bairro pesa mais em cada região."),
     ("Revisão do professor", "Tempo em linhas (um ano por linha) e tabela meses × anos.",
      "Comparar o mesmo mês nos dois anos e consultar os números exatos."),
+    ("Mapa", "Mapa de bairros e RPAs com o contorno oficial da Prefeitura, pintado pelo bairro informado.",
+     "Ver as regiões com mais chamados sem descartar os 54,7% sem coordenadas."),
+    ("Mapa", "Coordenadas conferidas com o mapa: 89,3% caem no bairro informado.",
+     "Validação territorial que faltava para mostrar os endereços recorrentes como pontos."),
 ], columns=["Etapa", "Decisão", "Por quê"])
 
 
@@ -715,7 +866,10 @@ def pagina_metodologia() -> None:
             "- **Serviço:** grupo 2 (Limpeza Urbana), serviço 6 (Remoção de Entulhos).\n"
             "- **Período:** chamados com abertura em 2024 ou 2025, encontrados em qualquer um dos três arquivos.\n"
             "- **Base:** planilha tratada da Sprint 2 com o tratamento de repetições (`dados_recife(5)`, aba "
-            "*Entulhos tratados*). Os CSVs originais não foram alterados.")
+            "*Entulhos tratados*). Os CSVs originais não foram alterados.\n"
+            "- **Mapa:** [Bairros do Recife](https://dados.recife.pe.gov.br/dataset/area-urbana) (GeoJSON oficial da "
+            "Prefeitura, licença ODbL), contornos simplificados em ~5 m por `preparar_mapa.py`. As RPAs são a "
+            "união dos bairros de cada uma.")
         fontes = pd.DataFrame(META["fontes"])[["fonte", "linhas_recebidas", "entulhos", "entulhos_2024_2025",
                                                 "primeira_abertura", "ultima_abertura"]]
         fontes = fontes.rename(columns={"fonte": "Arquivo", "linhas_recebidas": "Linhas (todos os serviços)",
@@ -758,7 +912,7 @@ def pagina_metodologia() -> None:
             "somam **22,5%** dos chamados únicos (na EDA, 22,89% das linhas publicadas).")
         st.markdown("#### Próximos passos")
         st.markdown(
-            "- Validar as coordenadas dentro do território do Recife e só então incluir o mapa.\n"
+            "- Juntar a população por bairro (Censo) para comparar taxas, e não só volumes.\n"
             "- Revisar com a fonte os endereços extremos e os endereços com chamados espalhados.\n"
             "- Confirmar com a Emlurb se vários chamados no mesmo endereço e dia são o mesmo pedido.")
         st.caption(f"Entrada: {META['entrada']} · SHA-256 {META['sha256_entrada'][:16]}…")
@@ -783,6 +937,7 @@ def pagina_metodologia() -> None:
 # ---------------------------------------------------------------- navegação
 PAG_VISAO = st.Page(pagina_visao_geral, title="Visão geral", icon=":material/dashboard:",
                     url_path="visao-geral", default=True)
+PAG_MAPA = st.Page(pagina_mapa, title="Mapa", icon=":material/map:", url_path="mapa")
 PAG_REC = st.Page(pagina_recorrencia, title="Endereços que se repetem", icon=":material/repeat:", url_path="recorrencia")
 PAG_TER = st.Page(pagina_territorio, title="RPAs e bairros", icon=":material/location_city:", url_path="territorio")
 PAG_TEMPO = st.Page(pagina_tempo, title="Chamados por mês", icon=":material/calendar_month:", url_path="tempo")
@@ -790,9 +945,9 @@ PAG_QUAL = st.Page(pagina_qualidade, title="Qualidade dos dados", icon=":materia
                    url_path="qualidade")
 PAG_MET = st.Page(pagina_metodologia, title="Fonte e método", icon=":material/info:", url_path="metodologia")
 
-navegacao = st.navigation([PAG_VISAO, PAG_REC, PAG_TER, PAG_TEMPO, PAG_QUAL, PAG_MET], position="top")
+navegacao = st.navigation([PAG_VISAO, PAG_MAPA, PAG_REC, PAG_TER, PAG_TEMPO, PAG_QUAL, PAG_MET], position="top")
 navegacao.run()
 
 st.divider()
-st.caption("Fonte: Portal de Dados Abertos do Recife — Central de Atendimento de Serviços da Emlurb (156), licença ODbL. "
+st.caption("Fonte: Portal de Dados Abertos do Recife — Central de Atendimento de Serviços da Emlurb (156) e Bairros do Recife, licença ODbL. "
            "Tratamento e análise: equipe do Projeto 5 (Gestão Digital de Resíduos Sólidos Urbanos), CESAR School.")

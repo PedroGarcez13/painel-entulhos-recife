@@ -44,6 +44,19 @@ Nenhum script altera a entrada. `preparar_dados.py` confere as contagens da Spri
 20.300 no recorte, 17.134 com endereço suficiente, 10.929 sem coordenadas, 1.218 no mesmo endereço e dia)
 e do tratamento de repetições (19.643 chamados únicos). Se algum número divergir, o script para.
 
+## Mapa
+
+Contornos: [Bairros do Recife](https://dados.recife.pe.gov.br/dataset/area-urbana), GeoJSON oficial da
+Prefeitura (licença ODbL), simplificado em ~5 m por `python preparar_mapa.py bairros-do-recife.geojson`
+(47.762 → 5.273 pontos, 133 KB; concorda em 99,9% com o original no teste de ponto em polígono).
+
+- A cor usa o **bairro informado** no chamado, então entram também os 54,7% sem coordenadas.
+- "Chamados por km²" divide pela área do bairro: por volume a RPA 6 lidera; por área, a RPA 2
+  (232 chamados/km², o dobro das outras).
+- `preparar_dados.py` confere cada coordenada com o mapa: 89,3% caem no bairro informado, 10,0% em outro
+  bairro (em geral vizinho) e 0,6% fora do Recife. Os pontos do mapa usam só as que caem no próprio bairro.
+- O mapa de fundo é o Carto Positron (gratuito, sem chave), carregado pelo Plotly.
+
 ## Tratamento de repetições
 
 O "Identificador na fonte" é só a numeração da linha em cada CSV (o mesmo número aparece nos três arquivos
@@ -64,6 +77,8 @@ endereço e dia → **19.643 chamados únicos**, que são a base de todo o paine
 |---|---|
 | `app.py` | Interface Streamlit: filtros, navegação por páginas, indicadores e gráficos (Plotly). |
 | `calculos.py` | Regras de cálculo (recorrência, séries, contagens, qualidade), sem interface. |
+| `preparar_mapa.py` | Simplifica o GeoJSON oficial de bairros e gera `dados/geo/bairros_recife.geojson`. |
+| `geo.py` | Ponto em polígono, simplificação e área, só com numpy. |
 | `tratar_repeticoes.py` | Marca as repetições na planilha e gera a `dados_recife(5).xlsx`. |
 | `preparar_dados.py` | Gera a base do painel a partir da planilha tratada. |
 | `tests/test_numeros_eda.py` | Confere os números sem filtros: EDA da Sprint 3 e base sem repetições. |
@@ -73,12 +88,13 @@ Rodar os testes: `python tests/test_numeros_eda.py`
 
 ## O que o painel tem
 
-Seis páginas na barra superior, todas com o mesmo modelo: pergunta como título → indicadores → gráfico →
+Sete páginas na barra superior, todas com o mesmo modelo: pergunta como título → indicadores → gráfico →
 leitura com o número → limite da interpretação → tabela e download.
 
 | Página | Pergunta | Conteúdo |
 |---|---|---|
 | Visão geral | O que o painel mostra? | Três achados recalculados pelo filtro, com link para a página de cada um. |
+| Mapa | Onde estão os chamados no mapa do Recife? | Bairros ou RPAs pintados por chamados, chamados por km² ou endereços recorrentes; pontos dos endereços recorrentes. |
 | Endereços que se repetem | Quais endereços pedem remoção de entulho várias vezes? | Endereços recorrentes por faixa de dias, os 10 com mais dias, conferência dos endereços com as coordenadas e histórico de um endereço. |
 | RPAs e bairros | Quais RPAs e bairros concentram os chamados? | Primeiro as 6 RPAs e o bairro que mais pesa em cada uma; depois os bairros dentro da RPA escolhida. |
 | Chamados por mês | Quantos chamados há em cada mês? | Uma linha por ano (jan–dez) e tabela meses × anos. |
