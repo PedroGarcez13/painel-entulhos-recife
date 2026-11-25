@@ -1,6 +1,7 @@
 # Painel — Remoção de Entulhos no Recife (Central 156)
 
-Entregável 6 do Projeto 5 (CC · Análise e Visualização de Dados): **Dashboard Consolidado**.
+Projeto 5 (CC · Análise e Visualização de Dados). Versão revisada após o retorno do professor sobre o
+Dashboard Consolidado (entregável 6).
 Publicado em https://entulhos-recife-156.streamlit.app/
 
 O painel responde às três perguntas do projeto para quem acompanha a limpeza urbana:
@@ -25,21 +26,37 @@ O painel abre em `http://localhost:8501`. A base do painel já está em `dados/p
 
 ```
 CSVs originais da Central 156 (2024, 2025, 2026)          ← dado bruto, preservado
-        │  Sprint 2: Python + planilha
+        │  Sprint 2: Python + planilha (os três arquivos juntos)
         ▼
-dados/entrada/dados_recife(4).xlsx  (aba "Entulhos tratados") ← dado tratado
+dados/entrada/dados_recife(4).xlsx  (aba "Entulhos tratados") ← dado tratado da Sprint 2
+        │  python tratar_repeticoes.py
+        ▼
+dados/entrada/dados_recife(5).xlsx  (+ colunas e aba "Repetições") ← repetições marcadas
         │  python preparar_dados.py
         ▼
-dados/painel/entulhos_painel.parquet + metadados.json      ← dado do painel
+dados/painel/entulhos_painel.csv.gz + metadados.json       ← dado do painel
         │  streamlit run app.py
         ▼
 Painel (filtros → indicadores, gráficos e tabelas)
 ```
 
-`preparar_dados.py` não altera a entrada. Ele converte tipos, mantém só as colunas usadas e confere as
-contagens da Sprint 2: 21.646 entulhos, 20.300 no recorte, 17.134 com endereço suficiente, 10.929 sem
-coordenadas e 1.218 no mesmo endereço e dia. Se algum número divergir, o script para sem gerar o painel.
-Se a planilha da Sprint 2 for atualizada, substitua o XLSX em `dados/entrada/` e rode o script de novo.
+Nenhum script altera a entrada. `preparar_dados.py` confere as contagens da Sprint 2 (21.646 entulhos,
+20.300 no recorte, 17.134 com endereço suficiente, 10.929 sem coordenadas, 1.218 no mesmo endereço e dia)
+e do tratamento de repetições (19.643 chamados únicos). Se algum número divergir, o script para.
+
+## Tratamento de repetições
+
+O "Identificador na fonte" é só a numeração da linha em cada CSV (o mesmo número aparece nos três arquivos
+com chamados diferentes), então a repetição é identificada pelo conteúdo, depois de juntar os arquivos:
+
+1. **Mesmo chamado em outro arquivo:** mesma data de abertura e mesma rua, número e bairro informados, em
+   arquivos diferentes (quase sempre um chamado de 2024 republicado no arquivo de 2025). Conta uma vez.
+2. **Mesmo endereço e dia:** com endereço identificável, mesma rua, número e bairro padronizados na mesma
+   data. Conta como uma ocorrência.
+
+Fica a linha com coordenadas; empatando, a do arquivo mais recente. As outras continuam na planilha com
+"Conta como chamado único?" = Não. No recorte 2024–2025: 20.300 linhas → −266 republicadas → −391 no mesmo
+endereço e dia → **19.643 chamados únicos**, que são a base de todo o painel.
 
 ## Estrutura
 
@@ -47,38 +64,34 @@ Se a planilha da Sprint 2 for atualizada, substitua o XLSX em `dados/entrada/` e
 |---|---|
 | `app.py` | Interface Streamlit: filtros, navegação por páginas, indicadores e gráficos (Plotly). |
 | `calculos.py` | Regras de cálculo (recorrência, séries, contagens, qualidade), sem interface. |
+| `tratar_repeticoes.py` | Marca as repetições na planilha e gera a `dados_recife(5).xlsx`. |
 | `preparar_dados.py` | Gera a base do painel a partir da planilha tratada. |
-| `tests/test_numeros_eda.py` | Confere se o painel sem filtros reproduz os números da EDA da Sprint 3. |
+| `tests/test_numeros_eda.py` | Confere os números sem filtros: EDA da Sprint 3 e base sem repetições. |
 | `.streamlit/config.toml` | Tema claro e cores do painel. |
 
 Rodar os testes: `python tests/test_numeros_eda.py`
 
 ## O que o painel tem
 
-Seis páginas na barra superior. Todas seguem o mesmo modelo, definido na Proposta de Integração e
-Publicação (entregável 5): pergunta como título → indicadores do recorte → gráfico principal → leitura com
-o número → limite da interpretação → tabela e download sob demanda → rodapé com fonte e licença.
+Seis páginas na barra superior, todas com o mesmo modelo: pergunta como título → indicadores → gráfico →
+leitura com o número → limite da interpretação → tabela e download.
 
 | Página | Pergunta | Conteúdo |
 |---|---|---|
-| Visão geral | O que o painel mostra? | Três achados recalculados pelo filtro (recorrência, território, tempo), cada um com link para sua página; avisos de uso. |
-| Recorrência | Quais endereços voltam a aparecer em dias diferentes? | Distribuição de dias distintos, Top 10/20/30, tabela pesquisável e histórico de um endereço ao clicar. |
-| Território | Em quais bairros e regiões os registros se concentram? | 15 bairros e 6 RPAs, por registros ou por endereços recorrentes. |
-| Tempo | Como os registros variam ao longo dos meses? | Série mensal por arquivo de origem, com a cobertura limitada sombreada. |
-| Qualidade dos dados | Quanto podemos confiar em cada campo? | Coordenadas por arquivo e quadro de problemas com a decisão tomada. |
-| Metodologia e fonte | De onde vêm os dados e o que o painel não afirma? | Fonte, licença, definições, histórico de decisões e download da base filtrada. |
+| Visão geral | O que o painel mostra? | Três achados recalculados pelo filtro, com link para a página de cada um. |
+| Endereços que se repetem | Quais endereços pedem remoção de entulho várias vezes? | Endereços recorrentes por faixa de dias, os 10 com mais dias, conferência dos endereços com as coordenadas e histórico de um endereço. |
+| RPAs e bairros | Quais RPAs e bairros concentram os chamados? | Primeiro as 6 RPAs e o bairro que mais pesa em cada uma; depois os bairros dentro da RPA escolhida. |
+| Chamados por mês | Quantos chamados há em cada mês? | Uma linha por ano (jan–dez) e tabela meses × anos. |
+| Qualidade dos dados | Os dados são confiáveis? | Tratamento de repetições, coordenadas por arquivo e quadro de problemas com a decisão. |
+| Fonte e método | De onde vêm os dados e como foram tratados? | Fonte, licença, definições, histórico de decisões e download da base filtrada. |
 
-- **Filtros na barra lateral**, aplicados a todas as páginas e mantidos ao trocar de página: período de
-  abertura (mês a mês), RPA, bairro (a lista acompanha as RPAs escolhidas), situação registrada, arquivo de
-  origem e o mínimo de dias distintos para considerar recorrência (padrão 3). Há um botão para limpar os filtros.
-- **Indicadores** no topo de cada página: registros, endereços recorrentes, participação desses endereços,
-  mês de pico e percentual sem coordenadas.
-- Se um filtro não retorna registros, a página avisa e sugere ampliar o período.
+- **Filtros na barra lateral**, aplicados a todas as páginas e mantidos ao trocar de página.
+- Se um filtro não retorna chamados, a página avisa e sugere ampliar o período.
 - Cada tabela pode ser baixada em CSV (separador `;`, decimal `,`, compatível com Excel em português).
 
 ## Regras de cálculo (iguais às da EDA)
 
-- **Registro** = linha publicada (não é protocolo único).
+- **Chamado** = linha que sobra depois do tratamento de repetições (não confirma descarte irregular).
 - **Endereço** = rua padronizada + número padronizado + bairro de referência, apenas quando
   "Endereço permite comparação?" = Sim.
 - **Recorrência** = quantidade de datas de abertura distintas por endereço. Vários chamados no mesmo dia
@@ -86,9 +99,10 @@ o número → limite da interpretação → tabela e download sob demanda → ro
 - **Bairro** sem correspondência na referência → `NÃO INFORMADO`. A **RPA** usada é a informada, para não
   perder esses 7 registros.
 
-Sem filtros, o painel reproduz a EDA: 931 endereços com 3 ou mais dias (de 11.556), que somam 4.646
-registros (22,89% do recorte). O maior caso é RUA CORONEL OLIVEIRA, 53 – AFOGADOS, com 71 dias. COHAB tem
-1.217 registros, a RPA 6 tem 4.680 e o mês de pico é dez/2024, com 1.669.
+Sem filtros: 19.643 chamados; 931 endereços com 3 ou mais dias (de 11.556, igual à EDA), que somam 4.416
+chamados (22,5%). O maior caso é RUA CORONEL OLIVEIRA, 53 – AFOGADOS, com 71 dias. A RPA 6 tem 4.592
+chamados e, dentro dela, COHAB pesa mais (1.192). O mês com mais chamados é dez/2024, com 1.474. Em 97,5%
+dos 488 endereços recorrentes com coordenadas, os chamados ficam a até 100 m do centro do endereço.
 
 > A SR1 citava 1.288 endereços / 27,8%. O critério daquele cálculo não está documentado e não pôde ser
 > reproduzido sobre a base tratada. O painel usa a regra documentada acima.
