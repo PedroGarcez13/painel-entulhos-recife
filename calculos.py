@@ -157,6 +157,12 @@ def quadro_qualidade(df: pd.DataFrame, rep: dict | None = None) -> pd.DataFrame:
     itens += [
         ("Coordenadas", "Sem latitude e longitude", int(df["sem_coordenadas"].sum()),
          "Mantido; posição não estimada."),
+        ("Coordenadas", "Coordenada em outro bairro que não o informado",
+         int(df["situacao_coord"].eq("Em outro bairro").sum()) if "situacao_coord" in df else 0,
+         "Mantido; o bairro informado vale para as contagens e o mapa."),
+        ("Coordenadas", "Coordenada fora do Recife",
+         int(df["situacao_coord"].eq("Fora do Recife").sum()) if "situacao_coord" in df else 0,
+         "Mantido; o ponto não entra no mapa."),
         ("Endereço", "Insuficiente para comparar endereços", int((~df["endereco_ok"]).sum()),
          "Fica fora da recorrência; entra nas contagens por mês, bairro e RPA."),
         ("Número", "Sem número identificável (SN, S/N)",
@@ -265,3 +271,55 @@ def repeticoes(publicados: pd.DataFrame) -> dict:
         "unicos": int(publicados["unico"].sum()),
         "grupos": int(publicados.loc[publicados["grupo_repeticao"].ne(""), "grupo_repeticao"].nunique()),
     }
+
+
+# ---------------------------------------------------------------- mapa
+def carregar_mapa() -> dict:
+    """Contornos dos 94 bairros (dados/geo/bairros_recife.geojson, gerado por preparar_mapa.py)."""
+    import geo
+    return geo.carregar_bairros()
+
+
+def tabela_mapa(df: pd.DataFrame, enderecos: pd.DataFrame, mapa: dict) -> pd.DataFrame:
+    """Uma linha por bairro do mapa (os 94), com chamados, endereços recorrentes e chamados por km².
+
+    A contagem usa o bairro INFORMADO no chamado (não a coordenada): assim entram também os chamados
+    sem latitude e longitude.
+    """
+    base = pd.DataFrame([f["properties"] for f in mapa["features"]])[["bairro", "nome", "rpa", "area_km2"]]
+    cham = df.groupby("bairro").size().rename("chamados")
+    rec = (enderecos.loc[enderecos["candidato"]].groupby("bairro").size().rename("recorrentes")
+           if not enderecos.empty else pd.Series(dtype=int, name="recorrentes"))
+    t = base.merge(cham, left_on="bairro", right_index=True, how="left") \
+            .merge(rec, left_on="bairro", right_index=True, how="left")
+    t[["chamados", "recorrentes"]] = t[["chamados", "recorrentes"]].fillna(0).astype(int)
+    t["por_km2"] = t["chamados"] / t["area_km2"]
+    t["pct"] = 100 * t["chamados"] / max(len(df), 1)
+    por_rpa = t.groupby("rpa").agg(rpa_chamados=("chamados", "sum"), rpa_recorrentes=("recorrentes", "sum"),
+                                   rpa_area=("area_km2", "sum"))
+    por_rpa["rpa_por_km2"] = por_rpa["rpa_chamados"] / por_rpa["rpa_area"]
+    por_rpa["rpa_pct"] = 100 * por_rpa["rpa_chamados"] / max(len(df), 1)
+    return t.merge(por_rpa, left_on="rpa", right_index=True, how="left")
+
+
+def pontos_recorrentes(df: pd.DataFrame, candidatos: pd.DataFrame) -> pd.DataFrame:
+    """Posição de cada endereço recorrente = mediana das coordenadas dos chamados que caem no próprio bairro."""
+    if candidatos.empty:
+        return pd.DataFrame(columns=CHAVE_ENDERECO + ["rpa", "dias_distintos", "latitude", "longitude", "com_coord"])
+    ok = df.loc[df["endereco_ok"] & df["situacao_coord"].eq("No bairro informado")]
+    pos = ok.groupby(CHAVE_ENDERECO).agg(latitude=("latitude", "median"), longitude=("longitude", "median"),
+                                         com_coord=("latitude", "size")).reset_index()
+    return candidatos[CHAVE_ENDERECO + ["rpa", "dias_distintos"]].merge(pos, on=CHAVE_ENDERECO, how="inner")
+
+
+SITUACOES_COORD = ["No bairro informado", "Em outro bairro", "Fora do Recife", "Sem coordenadas"]
+
+
+def conferencia_coordenadas(df: pd.DataFrame) -> pd.DataFrame:
+    t = df["situacao_coord"].value_counts().reindex(SITUACOES_COORD, fill_value=0).rename("chamados").reset_index()
+    t.columns = ["situacao", "chamados"]
+    com = int(t.loc[t["situacao"] != "Sem coordenadas", "chamados"].sum())
+    t["pct_com_coord"] = [100 * v / max(com, 1) if s != "Sem coordenadas" else float("nan")
+                          for s, v in zip(t["situacao"], t["chamados"])]
+    t["pct_total"] = 100 * t["chamados"] / max(len(df), 1)
+    return t

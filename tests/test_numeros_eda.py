@@ -84,6 +84,23 @@ def test_filtro_reduz_recorrencia():
     assert c.recorrencia(so_rpa6)["rpa"].eq("6").all()
 
 
+def test_mapa_e_coordenadas():
+    import geo
+    mapa = c.carregar_mapa()
+    assert len(mapa["features"]) == 94
+    assert 215 < sum(f["properties"]["area_km2"] for f in mapa["features"]) < 225  # Recife ≈ 218 km²
+    df = c.carregar_recorte()
+    end = c.recorrencia(df, c.LIMIAR_PADRAO)
+    t = c.tabela_mapa(df, end, mapa)
+    assert t["chamados"].sum() == len(df) - int(df["bairro"].eq("NÃO INFORMADO").sum())
+    assert t.sort_values("chamados").iloc[-1]["bairro"] == "COHAB"
+    assert t.groupby("rpa")["rpa_por_km2"].first().idxmax() == "2"
+    conf = c.conferencia_coordenadas(df).set_index("situacao")["chamados"].to_dict()
+    assert conf == {"No bairro informado": 7_956, "Em outro bairro": 893, "Fora do Recife": 57, "Sem coordenadas": 10_737}
+    # Ponto conhecido: Marco Zero (Bairro do Recife)
+    assert geo.localizar_bairro([-34.8711], [-8.0631], mapa)[0] == "RECIFE"
+
+
 if __name__ == "__main__":
     for nome, f in list(globals().items()):
         if nome.startswith("test_"):

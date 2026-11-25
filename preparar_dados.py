@@ -22,7 +22,10 @@ import re
 import sys
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
+
+import geo
 
 RAIZ = Path(__file__).resolve().parent
 ENTRADA = RAIZ / "dados" / "entrada" / "dados_recife(5).xlsx"
@@ -40,6 +43,10 @@ ESPERADO = {
     "chamados_unicos": 19_643,
     "republicados": 266,
     "mesmo_endereco_dia_removidos": 391,
+    # Conferência das coordenadas com o mapa de bairros (preparar_mapa.py), entre os chamados únicos:
+    "coord_no_bairro_informado": 7_956,
+    "coord_em_outro_bairro": 893,
+    "coord_fora_do_recife": 57,
 }
 
 
@@ -98,6 +105,13 @@ def main() -> None:
         "grupo_repeticao": texto("Grupo de repetição"),
     })
 
+    # Conferência das coordenadas com o mapa oficial de bairros (dados/geo/bairros_recife.geojson).
+    bairro_mapa = pd.Series(geo.localizar_bairro(painel["longitude"], painel["latitude"]), index=painel.index)
+    painel["bairro_mapa"] = bairro_mapa
+    painel["situacao_coord"] = np.select(
+        [painel["latitude"].isna() | painel["longitude"].isna(), bairro_mapa.eq(""), bairro_mapa.eq(painel["bairro"])],
+        ["Sem coordenadas", "Fora do Recife", "No bairro informado"], default="Em outro bairro")
+
     # Travas: se a entrada mudou, o painel não é gerado.
     recorte = painel.loc[painel["no_recorte"].astype(bool)]
     obtido = {
@@ -110,6 +124,10 @@ def main() -> None:
         "republicados": int(recorte["tipo_repeticao"].eq("Republicado em outro arquivo").sum()),
         "mesmo_endereco_dia_removidos": int(recorte["tipo_repeticao"].eq("Mesmo endereço e dia").sum()),
     }
+    unicos = recorte.loc[recorte["unico"].astype(bool)]
+    for chave, rotulo in [("coord_no_bairro_informado", "No bairro informado"),
+                          ("coord_em_outro_bairro", "Em outro bairro"), ("coord_fora_do_recife", "Fora do Recife")]:
+        obtido[chave] = int(unicos["situacao_coord"].eq(rotulo).sum())
     divergentes = {k: (obtido[k], v) for k, v in ESPERADO.items() if obtido[k] != v}
     if divergentes:
         sys.exit(f"Contagens diferentes da Sprint 2 (obtido, esperado): {divergentes}")

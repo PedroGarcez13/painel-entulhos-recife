@@ -9,7 +9,10 @@
     "mesmo_endereco_dia": 1218,
     "chamados_unicos": 19643,
     "republicados": 266,
-    "mesmo_endereco_dia_removidos": 391
+    "mesmo_endereco_dia_removidos": 391,
+    "coord_no_bairro_informado": 7956,
+    "coord_em_outro_bairro": 893,
+    "coord_fora_do_recife": 57
   },
   "fontes": [
     {
